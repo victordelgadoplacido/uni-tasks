@@ -15,7 +15,9 @@ export const SEED_TASKS: Task[] = [
     dueDate: null,
     plannedDate: null,
     planOrder: 0,
+    moduleOrder: 0,
     done: false,
+    status: "pending",
     priority: "medium",
   },
   {
@@ -26,7 +28,9 @@ export const SEED_TASKS: Task[] = [
     dueDate: null,
     plannedDate: null,
     planOrder: 0,
+    moduleOrder: 0,
     done: false,
+    status: "pending",
     priority: "high",
   },
   {
@@ -37,7 +41,9 @@ export const SEED_TASKS: Task[] = [
     dueDate: null,
     plannedDate: null,
     planOrder: 0,
+    moduleOrder: 0,
     done: false,
+    status: "pending",
     priority: "low",
   },
 ];

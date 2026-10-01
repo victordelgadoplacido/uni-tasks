@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { Task } from "@/lib/types";
+import { STATUS_LABEL, STATUS_PILL } from "@/lib/status";
 import { daysUntil, formatDueDate } from "@/lib/date";
 import { useAppData } from "@/app/providers";
 
@@ -35,14 +37,27 @@ export default function TaskRow({
         title={`${task.priority} priority`}
         className={`h-1.5 w-1.5 shrink-0 rounded-full ${PRIORITY_DOT[task.priority]}`}
       />
-      <button
-        onClick={onEdit}
-        className={`flex-1 truncate text-left text-sm ${
+      <Link
+        href={`/tasks/${task.id}`}
+        className={`flex-1 truncate text-left text-sm hover:underline ${
           task.done ? "text-slate-400 line-through" : "text-slate-800"
         }`}
       >
         {task.title}
+      </Link>
+      <button
+        onClick={onEdit}
+        className="shrink-0 rounded px-1.5 text-xs text-slate-400 opacity-0 hover:bg-slate-100 hover:text-slate-700 focus:opacity-100 group-hover:opacity-100"
+      >
+        Edit
       </button>
+      {task.status === "in_progress" && (
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL.in_progress}`}
+        >
+          {STATUS_LABEL.in_progress}
+        </span>
+      )}
       {task.dueDate && (
         <span
           className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${

@@ -30,7 +30,8 @@ interface AppDataContextValue {
   addModule: (name: string, color: Module["color"]) => void;
   updateModule: (id: string, changes: Partial<Omit<Module, "id">>) => void;
   deleteModule: (id: string) => void;
-  addTask: (task: Omit<Task, "id">) => void;
+  // moduleOrder is assigned here (end of the module), not by the caller.
+  addTask: (task: Omit<Task, "id" | "moduleOrder">) => void;
   updateTask: (id: string, changes: Partial<Omit<Task, "id">>) => void;
   deleteTask: (id: string) => void;
   toggleTaskDone: (id: string) => void;
@@ -38,6 +39,8 @@ interface AppDataContextValue {
   // inserting it before `beforeTaskId` within that day, or at the end if
   // omitted. Used by the Week view's drag and drop.
   moveTaskToDay: (taskId: string, date: string | null, beforeTaskId?: string) => void;
+  // Sets moduleOrder of each task to its index in orderedIds (module page).
+  reorderModuleTasks: (orderedIds: string[]) => void;
   importIcalEvents: (events: IcalEvent[], fileName: string) => void;
   clearIcalEvents: () => void;
   addRoutine: (title: string) => void;
@@ -46,6 +49,24 @@ interface AppDataContextValue {
 }
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
+
+function endOfModule(tasks: Task[], moduleId: string): number {
+  return tasks
+    .filter((t) => t.moduleId === moduleId)
+    .reduce((max, t) => Math.max(max, t.moduleOrder + 1), 0);
+}
+
+// `done` mirrors status === "completed"; whichever one a caller changes, set
+// the other to match so the two never drift apart.
+function withSyncedStatus(
+  changes: Partial<Omit<Task, "id">>
+): Partial<Omit<Task, "id">> {
+  if (changes.status) return { ...changes, done: changes.status === "completed" };
+  if ("done" in changes) {
+    return { ...changes, status: changes.done ? "completed" : "pending" };
+  }
+  return changes;
+}
 
 interface AppDataProviderProps {
   children: ReactNode;
@@ -172,8 +193,9 @@ export function AppDataProvider({
           });
       },
 
-      addTask: (task) => {
+      addTask: (newTask) => {
         const id = crypto.randomUUID();
+        const task = { ...newTask, moduleOrder: endOfModule(tasks, newTask.moduleId) };
         setTasks((prev) => [...prev, { ...task, id }]);
         supabase
           .from("tasks")
@@ -183,7 +205,12 @@ export function AppDataProvider({
           });
       },
 
-      updateTask: (id, changes) => {
+      updateTask: (id, rawChanges) => {
+        const changes = withSyncedStatus(rawChanges);
+        const current = tasks.find((t) => t.id === id);
+        if (changes.moduleId && current && changes.moduleId !== current.moduleId) {
+          changes.moduleOrder = endOfModule(tasks, changes.moduleId);
+        }
         let prevTask: Task | undefined;
         setTasks((prev) =>
           prev.map((t) => {
@@ -229,14 +256,14 @@ export function AppDataProvider({
             if (t.id === id) {
               prevTask = t;
               nextDone = !t.done;
-              return { ...t, done: nextDone };
+              return { ...t, done: nextDone, status: nextDone ? "completed" : "pending" };
             }
             return t;
           })
         );
         supabase
           .from("tasks")
-          .update({ done: nextDone })
+          .update({ done: nextDone, status: nextDone ? "completed" : "pending" })
           .eq("id", id)
           .then(({ error }) => {
             if (error && prevTask) {
@@ -298,6 +325,20 @@ export function AppDataProvider({
             : supabase.rpc("reorder_tasks", { p_updates: movedIds });
 
         persist.then(({ error }: { error: unknown }) => {
+          if (error) setTasks(prevTasks);
+        });
+      },
+
+      reorderModuleTasks: (orderedIds) => {
+        let prevTasks: Task[] = [];
+        const order = new Map(orderedIds.map((id, i) => [id, i]));
+        setTasks((prev) => {
+          prevTasks = prev;
+          return prev.map((t) =>
+            order.has(t.id) ? { ...t, moduleOrder: order.get(t.id)! } : t
+          );
+        });
+        supabase.rpc("reorder_module_tasks", { p_ids: orderedIds }).then(({ error }) => {
           if (error) setTasks(prevTasks);
         });
       },

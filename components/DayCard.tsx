@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Module, Routine, Task } from "@/lib/types";
 import { WeekDay, formatDueDate } from "@/lib/date";
 import { COLORS } from "@/lib/colors";
@@ -127,9 +128,13 @@ export default function DayCard({
                 />
                 <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${colorClasses.dot}`} />
                 <div className="min-w-0 flex-1">
-                  <p className={`text-sm leading-snug ${task.done ? "text-slate-400 line-through" : "text-slate-800"}`}>
+                  <Link
+                    href={`/tasks/${task.id}`}
+                    draggable={false}
+                    className={`block text-sm leading-snug hover:underline ${task.done ? "text-slate-400 line-through" : "text-slate-800"}`}
+                  >
                     {task.title}
-                  </p>
+                  </Link>
                   {task.dueDate && (
                     <p className="text-xs text-slate-400">due {formatDueDate(task.dueDate)}</p>
                   )}

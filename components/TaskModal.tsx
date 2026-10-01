@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Module, Priority, Task } from "@/lib/types";
+import Link from "next/link";
+import { Module, Priority, Task, TaskStatus } from "@/lib/types";
+import { STATUSES, STATUS_LABEL } from "@/lib/status";
 import { useAppData } from "@/app/providers";
 
 interface TaskModalProps {
@@ -29,6 +31,7 @@ export default function TaskModal({
   const [dueDate, setDueDate] = useState(task?.dueDate ?? defaultDueDate ?? "");
   const [priority, setPriority] = useState<Priority>(task?.priority ?? "medium");
   const [notes, setNotes] = useState(task?.notes ?? "");
+  const [status, setStatus] = useState<TaskStatus>(task?.status ?? "pending");
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -48,12 +51,18 @@ export default function TaskModal({
       dueDate: dueDate || null,
       priority,
       notes: notes.trim(),
+      status,
     };
 
     if (isEditing && task) {
       updateTask(task.id, payload);
     } else {
-      addTask({ ...payload, done: false, plannedDate: null, planOrder: 0 });
+      addTask({
+        ...payload,
+        done: status === "completed",
+        plannedDate: null,
+        planOrder: 0,
+      });
     }
     onClose();
   }
@@ -123,41 +132,69 @@ export default function TaskModal({
             </div>
           </div>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              Due date
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="date"
-                value={dueDate ?? ""}
-                onChange={(e) => setDueDate(e.target.value)}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Status
+              </label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as TaskStatus)}
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
-              />
-              {dueDate && (
-                <button
-                  type="button"
-                  onClick={() => setDueDate("")}
-                  className="whitespace-nowrap rounded-md border border-slate-300 px-2 text-xs text-slate-600 hover:bg-slate-50"
-                >
-                  Clear
-                </button>
-              )}
+              >
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {STATUS_LABEL[s]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Due date
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="date"
+                  value={dueDate ?? ""}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className="w-full min-w-0 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                />
+                {dueDate && (
+                  <button
+                    type="button"
+                    onClick={() => setDueDate("")}
+                    className="whitespace-nowrap rounded-md border border-slate-300 px-2 text-xs text-slate-600 hover:bg-slate-50"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">
-              Notes
+              Description
             </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
-              placeholder="Optional details"
+              placeholder="What is this task about?"
             />
           </div>
+
+          {isEditing && task && (
+            <Link
+              href={`/tasks/${task.id}`}
+              onClick={onClose}
+              className="inline-block text-sm font-medium text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline"
+            >
+              Open task page &rarr;
+            </Link>
+          )}
 
           <div className="flex items-center justify-between pt-2">
             <div>

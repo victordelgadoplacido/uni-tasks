@@ -18,7 +18,10 @@ npm install
 3. Create a [Supabase](https://supabase.com) project (free tier is fine).
    - In the SQL Editor, run the contents of
      [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql)
-     once to create the tables and Row Level Security policies.
+     and then every later file in that folder in order
+     ([`0002_task_pages.sql`](supabase/migrations/0002_task_pages.sql),
+     [`0003_module_order.sql`](supabase/migrations/0003_module_order.sql)),
+     once each, to create the tables and Row Level Security policies.
    - In Authentication → URL Configuration, add
      `http://localhost:3000/auth/callback` as a redirect URL (add your
      production URL's `/auth/callback` too once you deploy).
@@ -55,9 +58,20 @@ Supabase hashes and stores passwords itself; this app never touches them.
 
 ## Using it
 
-- **List view** (`/`): tasks grouped by module. Click a module name to edit/
-  delete it, click "+ Task" to add one, click a task to edit it, check the
-  box to mark it done.
+- **List view** (`/`): tasks grouped by module. Click a module name to open
+  its page, "Edit" to rename/recolor/delete it, "+ Task" to add one, click a
+  task to open its page (or
+  "Edit" on hover for the quick form), check the box to mark it done.
+- **Module page** (`/modules/<id>`): all of a module's tasks with their
+  status, due date and subtask progress. Drag tasks (or use the ↑/↓ buttons)
+  to reorder them; the list view follows the same order. Completed tasks are
+  tucked into a collapsible section at the bottom.
+- **Task page** (`/tasks/<id>`): set the status (Pending / In progress /
+  Completed), write a description, and attach notes, website links and
+  documents from your computer. Optionally split the task into subtasks —
+  each is its own box with a status, description, notes, links and
+  documents. Documents are stored as file paths; browsers can't open local
+  files from a web page, so use "Copy path" and paste it into File Explorer.
 - **Calendar view** (`/calendar`): monthly grid, tasks with a due date show
   up as colored chips on their day (color = module). Click an empty day to
   add a task due that day; click a chip to edit that task.
@@ -75,6 +89,8 @@ app/
     page.tsx               List view
     calendar/page.tsx      Calendar view
     week/page.tsx           Week view
+    modules/[id]/page.tsx   Module page (loads subtask progress per task)
+    tasks/[id]/page.tsx     Task page (loads its subtasks + notes/links/documents)
     admin/                  Admin-only user list + password-reset trigger
   auth/callback/route.ts   Exchanges a Supabase auth code for a session
   providers.tsx            Shared state (modules + tasks + ...), backed by Supabase
@@ -83,6 +99,9 @@ components/
   CalendarGrid.tsx   Month grid
   TaskRow.tsx        Single task row
   TaskModal.tsx       Add/edit task form
+  ModulePage.tsx      Module page: reorderable task list
+  TaskPage.tsx        Task page: status, description, subtasks
+  TaskItems.tsx       Notes / website links / documents list + forms
   ModuleModal.tsx     Add/edit module form
   NavTabs.tsx        List/Calendar/Week/Admin tab switcher
   SignOutButton.tsx  Signs out and redirects to /login
@@ -93,7 +112,7 @@ lib/
   date.ts    Date formatting + calendar grid helpers
   supabase/  Browser/server/admin Supabase clients + DB row mappers
   admin/     Server-only admin helpers (list users, verify admin role)
-supabase/migrations/0001_init.sql   Database schema + Row Level Security
+supabase/migrations/   Database schema + Row Level Security (run in order)
 middleware.ts   Redirects signed-out visitors to /login
 ```
 
