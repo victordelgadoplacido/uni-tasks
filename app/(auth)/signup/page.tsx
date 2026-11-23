@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 
 export default function SignupPage() {
   const supabase = createClient();
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +20,11 @@ export default function SignupPage() {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        // Picked up by the handle_new_user trigger into profiles.display_name.
+        data: { display_name: name.trim() },
+      },
     });
     setSubmitting(false);
     if (error) {
@@ -42,6 +47,17 @@ export default function SignupPage() {
       onSubmit={handleSubmit}
       className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
     >
+      <div>
+        <label className="mb-1 block text-sm font-medium text-slate-700">Your name</label>
+        <input
+          required
+          maxLength={60}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Shown to people you share modules with"
+          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+        />
+      </div>
       <div>
         <label className="mb-1 block text-sm font-medium text-slate-700">Email</label>
         <input

@@ -1,16 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Subtask, TaskItem, TaskStatus } from "@/lib/types";
+import { Subtask, TaskActivity, TaskItem, TaskStatus } from "@/lib/types";
 import { COLORS } from "@/lib/colors";
 import { formatDueDate } from "@/lib/date";
 import { STATUSES, STATUS_LABEL, STATUS_PILL } from "@/lib/status";
 import { createClient } from "@/lib/supabase/client";
 import { subtaskChangesToRow } from "@/lib/supabase/mappers";
+import { TaskPageData, fetchTaskPageData } from "@/lib/supabase/queries";
 import { useAppData } from "@/app/providers";
 import TaskItems, { ItemActions } from "./TaskItems";
 import TaskModal from "./TaskModal";
+import ActivityTimeline from "./ActivityTimeline";
+import Avatar from "./Avatar";
 
 type SubtaskChanges = Partial<Pick<Subtask, "title" | "description" | "status">>;
 
@@ -26,24 +29,90 @@ function nextPosition(list: { position: number }[]): number {
 
 export default function TaskPage({
   taskId,
-  userId,
-  initialSubtasks,
-  initialItems,
+  initial,
 }: {
   taskId: string;
-  userId: string;
-  initialSubtasks: Subtask[];
-  initialItems: TaskItem[];
+  initial: TaskPageData;
 }) {
-  const { tasks, modules, updateTask } = useAppData();
+  const { currentUser, tasks, modules, members, updateTask } = useAppData();
+  const userId = currentUser.id;
   const supabase = useMemo(() => createClient(), []);
-  const [subtasks, setSubtasks] = useState<Subtask[]>(initialSubtasks);
-  const [items, setItems] = useState<TaskItem[]>(initialItems);
+  const [subtasks, setSubtasks] = useState<Subtask[]>(initial.subtasks);
+  const [items, setItems] = useState<TaskItem[]>(initial.items);
+  const [activity, setActivity] = useState<TaskActivity[]>(initial.activity);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>(initial.assigneeIds);
   const [editingDetails, setEditingDetails] = useState(false);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState<string | null>(null);
 
   const task = tasks.find((t) => t.id === taskId);
   const module = modules.find((m) => m.id === task?.moduleId);
+  const moduleMembers = members.filter((m) => m.moduleId === task?.moduleId);
+
+  function nameOf(id: string | null): string {
+    if (!id) return "Someone";
+    if (id === userId) return currentUser.displayName;
+    return moduleMembers.find((m) => m.userId === id)?.displayName ?? "Former member";
+  }
+
+  // Live collaboration: every change to this task's content (by anyone)
+  // writes a task_activity row via database triggers, so one subscription
+  // to new activity is enough to know when to re-fetch the whole page. The
+  // task row itself (title, status, ...) is kept live by AppDataProvider.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+
+    function refresh() {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const data = await fetchTaskPageData(supabase, taskId);
+        if (cancelled) return;
+        setSubtasks(data.subtasks);
+        setItems(data.items);
+        setActivity(data.activity);
+        setAssigneeIds(data.assigneeIds);
+      }, 300);
+    }
+
+    const channel = supabase.channel(`task-${taskId}`).on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "task_activity", filter: `task_id=eq.${taskId}` },
+      refresh
+    );
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
+      if (data.session) supabase.realtime.setAuth(data.session.access_token);
+      channel.subscribe();
+    });
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, taskId]);
+
+  function addAssignee(memberId: string) {
+    setAssigneeIds((prev) => (prev.includes(memberId) ? prev : [...prev, memberId]));
+    supabase
+      .from("task_assignees")
+      .insert({ task_id: taskId, user_id: memberId })
+      .then(({ error }) => {
+        if (error) setAssigneeIds((prev) => prev.filter((id) => id !== memberId));
+      });
+  }
+
+  function removeAssignee(memberId: string) {
+    const prevIds = assigneeIds;
+    setAssigneeIds((prev) => prev.filter((id) => id !== memberId));
+    supabase
+      .from("task_assignees")
+      .delete()
+      .match({ task_id: taskId, user_id: memberId })
+      .then(({ error }) => {
+        if (error) setAssigneeIds(prevIds);
+      });
+  }
 
   // --- persistence (optimistic, rolled back on error like app/providers.tsx)
 
@@ -191,13 +260,16 @@ export default function TaskPage({
   const pageItems = items.filter((i) => i.subtaskId === null);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
+    <div className="mx-auto max-w-6xl">
       <Link
         href={module ? `/modules/${module.id}` : "/"}
-        className="inline-block text-sm text-slate-500 hover:text-slate-900"
+        className="mb-5 inline-block text-sm text-slate-500 hover:text-slate-900"
       >
         &larr; {module ? module.name : "All tasks"}
       </Link>
+
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="min-w-0 space-y-5">
 
       {/* Header */}
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -246,6 +318,15 @@ export default function TaskPage({
               </span>
             </div>
           </div>
+
+          <Assignees
+            assigneeIds={assigneeIds}
+            candidates={moduleMembers}
+            currentUserId={userId}
+            nameOf={nameOf}
+            onAdd={addAssignee}
+            onRemove={removeAssignee}
+          />
         </div>
       </section>
 
@@ -352,10 +433,116 @@ export default function TaskPage({
           )
         )}
       </section>
+      </div>
+
+      {/* Timeline */}
+      <aside className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
+        <h3 className="mb-4 text-sm font-semibold text-slate-900">Activity</h3>
+        <ActivityTimeline activity={activity} nameOf={nameOf} />
+      </aside>
+      </div>
 
       {editingDetails && (
         <TaskModal modules={modules} task={task} onClose={() => setEditingDetails(false)} />
       )}
+    </div>
+  );
+}
+
+// "People working on this": avatars with names, a one-click join/leave for
+// the current user, and a picker for adding other module members.
+function Assignees({
+  assigneeIds,
+  candidates,
+  currentUserId,
+  nameOf,
+  onAdd,
+  onRemove,
+}: {
+  assigneeIds: string[];
+  candidates: { userId: string; displayName: string }[];
+  currentUserId: string;
+  nameOf: (id: string) => string;
+  onAdd: (userId: string) => void;
+  onRemove: (userId: string) => void;
+}) {
+  const [picking, setPicking] = useState(false);
+  const imOn = assigneeIds.includes(currentUserId);
+  const addable = candidates.filter(
+    (c) => !assigneeIds.includes(c.userId) && c.userId !== currentUserId
+  );
+
+  return (
+    <div className="border-t border-slate-100 pt-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          People working on this
+        </h3>
+        <button
+          onClick={() => (imOn ? onRemove(currentUserId) : onAdd(currentUserId))}
+          className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+            imOn
+              ? "text-slate-500 hover:bg-slate-100"
+              : "bg-slate-900 text-white hover:bg-slate-700"
+          }`}
+        >
+          {imOn ? "Leave" : "I'm working on this"}
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {assigneeIds.length === 0 && (
+          <span className="text-sm text-slate-400">Nobody yet.</span>
+        )}
+        {assigneeIds.map((id) => (
+          <span
+            key={id}
+            className="group flex items-center gap-1.5 rounded-full bg-slate-100 py-0.5 pl-0.5 pr-2 text-sm text-slate-700"
+          >
+            <Avatar userId={id} name={nameOf(id)} size="sm" />
+            {nameOf(id)}
+            <button
+              onClick={() => onRemove(id)}
+              title={`Remove ${nameOf(id)}`}
+              className="text-slate-400 hover:text-rose-600"
+            >
+              &times;
+            </button>
+          </span>
+        ))}
+
+        {addable.length > 0 && (
+          <div className="relative">
+            <button
+              onClick={() => setPicking((p) => !p)}
+              className="rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-500 hover:border-slate-400 hover:text-slate-800"
+            >
+              + Add person
+            </button>
+            {picking && (
+              <ul
+                className="absolute left-0 top-full z-20 mt-1 max-h-60 w-56 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+                onMouseLeave={() => setPicking(false)}
+              >
+                {addable.map((c) => (
+                  <li key={c.userId}>
+                    <button
+                      onClick={() => {
+                        onAdd(c.userId);
+                        setPicking(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    >
+                      <Avatar userId={c.userId} name={c.displayName} size="sm" />
+                      {c.displayName}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

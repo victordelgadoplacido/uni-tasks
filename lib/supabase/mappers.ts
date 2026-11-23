@@ -1,6 +1,14 @@
-import { Module, Task, Routine, Subtask, TaskItem } from "@/lib/types";
+import {
+  Module,
+  ModuleMember,
+  Task,
+  TaskActivity,
+  Routine,
+  Subtask,
+  TaskItem,
+} from "@/lib/types";
 
-// Row shapes from supabase/migrations/0001_init.sql. Keeping these mappers in
+// Row shapes from supabase/migrations/. Keeping these mappers in
 // one place means snake_case DB columns never leak past the data layer
 // (app/providers.tsx and app/(app)/layout.tsx) into components.
 
@@ -8,6 +16,16 @@ export interface ModuleRow {
   id: string;
   name: string;
   color: Module["color"];
+  user_id: string;
+}
+
+// module_members embedded with the member's profile:
+// .select("module_id, user_id, role, profiles(display_name)")
+export interface ModuleMemberRow {
+  module_id: string;
+  user_id: string;
+  role: ModuleMember["role"];
+  profiles: { display_name: string } | null;
 }
 
 export interface TaskRow {
@@ -19,9 +37,22 @@ export interface TaskRow {
   done: boolean;
   status: Task["status"];
   priority: Task["priority"];
-  planned_date: string | null;
-  plan_order: number;
   module_order: number;
+}
+
+// The current user's personal week plan for one task (task_plans table).
+export interface TaskPlanRow {
+  task_id: string;
+  planned_date: string;
+  plan_order: number;
+}
+
+export interface TaskActivityRow {
+  id: number;
+  actor_id: string | null;
+  action: string;
+  details: TaskActivity["details"];
+  created_at: string;
 }
 
 export interface SubtaskRow {
@@ -54,14 +85,19 @@ export interface RoutineCompletionRow {
 }
 
 export function rowToModule(row: ModuleRow): Module {
-  return { id: row.id, name: row.name, color: row.color };
+  return { id: row.id, name: row.name, color: row.color, ownerId: row.user_id };
 }
 
-export function moduleToRow(m: Omit<Module, "id">, userId: string) {
-  return { name: m.name, color: m.color, user_id: userId };
+export function rowToModuleMember(row: ModuleMemberRow): ModuleMember {
+  return {
+    moduleId: row.module_id,
+    userId: row.user_id,
+    role: row.role,
+    displayName: row.profiles?.display_name || "Unknown",
+  };
 }
 
-export function rowToTask(row: TaskRow): Task {
+export function rowToTask(row: TaskRow, plan?: TaskPlanRow): Task {
   return {
     id: row.id,
     moduleId: row.module_id,
@@ -71,12 +107,23 @@ export function rowToTask(row: TaskRow): Task {
     done: row.done,
     status: row.status,
     priority: row.priority,
-    plannedDate: row.planned_date,
-    planOrder: row.plan_order,
+    plannedDate: plan?.planned_date ?? null,
+    planOrder: plan?.plan_order ?? 0,
     moduleOrder: row.module_order,
   };
 }
 
+export function rowToTaskActivity(row: TaskActivityRow): TaskActivity {
+  return {
+    id: row.id,
+    actorId: row.actor_id,
+    action: row.action,
+    details: row.details,
+    createdAt: row.created_at,
+  };
+}
+
+// plannedDate/planOrder live in task_plans, not tasks, so they're not here.
 export function taskToRow(t: Omit<Task, "id">, userId: string) {
   return {
     module_id: t.moduleId,
@@ -86,8 +133,6 @@ export function taskToRow(t: Omit<Task, "id">, userId: string) {
     done: t.done,
     status: t.status,
     priority: t.priority,
-    planned_date: t.plannedDate,
-    plan_order: t.planOrder,
     module_order: t.moduleOrder,
     user_id: userId,
   };
@@ -102,8 +147,6 @@ export function taskChangesToRow(changes: Partial<Omit<Task, "id">>) {
   if ("done" in changes) row.done = changes.done;
   if ("status" in changes) row.status = changes.status;
   if ("priority" in changes) row.priority = changes.priority;
-  if ("plannedDate" in changes) row.planned_date = changes.plannedDate;
-  if ("planOrder" in changes) row.plan_order = changes.planOrder;
   if ("moduleOrder" in changes) row.module_order = changes.moduleOrder;
   return row;
 }

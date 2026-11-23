@@ -9,9 +9,18 @@ import {
   useState,
   ReactNode,
 } from "react";
-import { IcalEvent, IcalSource, Module, Routine, Task } from "@/lib/types";
+import {
+  CurrentUser,
+  IcalEvent,
+  IcalSource,
+  Module,
+  ModuleMember,
+  Routine,
+  Task,
+} from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 import { taskChangesToRow, taskToRow } from "@/lib/supabase/mappers";
+import { fetchSharedData } from "@/lib/supabase/queries";
 
 const ICAL_EVENTS_KEY = "uni-tasks:icalEvents";
 const ICAL_SOURCE_KEY = "uni-tasks:icalSource";
@@ -20,7 +29,10 @@ const ICAL_SOURCE_KEY = "uni-tasks:icalSource";
 type RoutineCompletions = Record<string, string[]>;
 
 interface AppDataContextValue {
+  currentUser: CurrentUser;
   modules: Module[];
+  // Members of every module the current user belongs to.
+  members: ModuleMember[];
   tasks: Task[];
   icalEvents: IcalEvent[];
   icalSource: IcalSource | null;
@@ -28,8 +40,13 @@ interface AppDataContextValue {
   routineCompletions: RoutineCompletions;
   loaded: boolean;
   addModule: (name: string, color: Module["color"]) => void;
-  updateModule: (id: string, changes: Partial<Omit<Module, "id">>) => void;
+  updateModule: (id: string, changes: Partial<Pick<Module, "name" | "color">>) => void;
   deleteModule: (id: string) => void;
+  // Owner only. Resolves to an error message, or null on success.
+  inviteToModule: (moduleId: string, email: string) => Promise<string | null>;
+  // Owner removes someone, or pass your own id to leave a shared module.
+  removeModuleMember: (moduleId: string, userId: string) => void;
+  setDisplayName: (name: string) => void;
   // moduleOrder is assigned here (end of the module), not by the caller.
   addTask: (task: Omit<Task, "id" | "moduleOrder">) => void;
   updateTask: (id: string, changes: Partial<Omit<Task, "id">>) => void;
@@ -70,8 +87,9 @@ function withSyncedStatus(
 
 interface AppDataProviderProps {
   children: ReactNode;
-  userId: string;
+  currentUser: CurrentUser;
   initialModules: Module[];
+  initialMembers: ModuleMember[];
   initialTasks: Task[];
   initialRoutines: Routine[];
   initialRoutineCompletions: RoutineCompletions;
@@ -79,15 +97,19 @@ interface AppDataProviderProps {
 
 export function AppDataProvider({
   children,
-  userId,
+  currentUser: initialCurrentUser,
   initialModules,
+  initialMembers,
   initialTasks,
   initialRoutines,
   initialRoutineCompletions,
 }: AppDataProviderProps) {
   const supabase = useMemo(() => createClient(), []);
 
+  const [currentUser, setCurrentUser] = useState<CurrentUser>(initialCurrentUser);
+  const userId = currentUser.id;
   const [modules, setModules] = useState<Module[]>(initialModules);
+  const [members, setMembers] = useState<ModuleMember[]>(initialMembers);
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [routines, setRoutines] = useState<Routine[]>(initialRoutines);
   const [routineCompletions, setRoutineCompletions] = useState<RoutineCompletions>(
@@ -126,9 +148,51 @@ export function AppDataProvider({
     }
   }, [icalSource]);
 
+  // Live collaboration: when anyone changes a module, its members or its
+  // tasks, re-fetch the shared data (debounced, since e.g. a reorder fires
+  // one event per task). RLS on the realtime feed limits events to modules
+  // this user belongs to. Own changes come back through here too, which
+  // simply confirms the optimistic state.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+
+    function refresh() {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const data = await fetchSharedData(supabase);
+        if (cancelled) return;
+        setModules(data.modules);
+        setMembers(data.members);
+        setTasks(data.tasks);
+      }, 400);
+    }
+
+    const channel = supabase.channel("shared-data");
+    for (const table of ["modules", "module_members", "tasks"]) {
+      channel.on("postgres_changes", { event: "*", schema: "public", table }, refresh);
+    }
+
+    // Make sure the realtime socket uses this user's session (not the anon
+    // key) so RLS lets their modules' events through.
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
+      if (data.session) supabase.realtime.setAuth(data.session.access_token);
+      channel.subscribe();
+    });
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }, [supabase]);
+
   const value = useMemo<AppDataContextValue>(
     () => ({
+      currentUser,
       modules,
+      members,
       tasks,
       icalEvents,
       icalSource,
@@ -138,12 +202,23 @@ export function AppDataProvider({
 
       addModule: (name, color) => {
         const id = crypto.randomUUID();
-        setModules((prev) => [...prev, { id, name, color }]);
+        // The owner's module_members row is added by a database trigger.
+        const owner: ModuleMember = {
+          moduleId: id,
+          userId,
+          role: "owner",
+          displayName: currentUser.displayName,
+        };
+        setModules((prev) => [...prev, { id, name, color, ownerId: userId }]);
+        setMembers((prev) => [...prev, owner]);
         supabase
           .from("modules")
           .insert({ id, name, color, user_id: userId })
           .then(({ error }) => {
-            if (error) setModules((prev) => prev.filter((m) => m.id !== id));
+            if (error) {
+              setModules((prev) => prev.filter((m) => m.id !== id));
+              setMembers((prev) => prev.filter((m) => m.moduleId !== id));
+            }
           });
       },
 
@@ -191,6 +266,88 @@ export function AppDataProvider({
               setTasks(prevTasks);
             }
           });
+      },
+
+      inviteToModule: async (moduleId, email) => {
+        const { data: newUserId, error } = await supabase.rpc("add_module_member", {
+          p_module_id: moduleId,
+          p_email: email,
+        });
+        if (error) return error.message;
+        // Fetch the new member's name (now visible to us via RLS).
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("display_name")
+          .eq("id", newUserId)
+          .single();
+        setMembers((prev) =>
+          prev.some((m) => m.moduleId === moduleId && m.userId === newUserId)
+            ? prev
+            : [
+                ...prev,
+                {
+                  moduleId,
+                  userId: newUserId as string,
+                  role: "member",
+                  displayName: profile?.display_name || email,
+                },
+              ]
+        );
+        return null;
+      },
+
+      removeModuleMember: (moduleId, memberId) => {
+        const leaving = memberId === userId;
+        let prevMembers: ModuleMember[] = [];
+        let prevModules: Module[] = [];
+        let prevTasks: Task[] = [];
+        setMembers((prev) => {
+          prevMembers = prev;
+          return leaving
+            ? prev.filter((m) => m.moduleId !== moduleId)
+            : prev.filter((m) => !(m.moduleId === moduleId && m.userId === memberId));
+        });
+        if (leaving) {
+          setModules((prev) => {
+            prevModules = prev;
+            return prev.filter((m) => m.id !== moduleId);
+          });
+          setTasks((prev) => {
+            prevTasks = prev;
+            return prev.filter((t) => t.moduleId !== moduleId);
+          });
+        }
+        supabase
+          .from("module_members")
+          .delete()
+          .match({ module_id: moduleId, user_id: memberId })
+          .then(({ error }) => {
+            if (error) {
+              setMembers(prevMembers);
+              if (leaving) {
+                setModules(prevModules);
+                setTasks(prevTasks);
+              }
+            }
+          });
+      },
+
+      setDisplayName: (name) => {
+        const prevUser = currentUser;
+        const rename = (m: ModuleMember) =>
+          m.userId === userId ? { ...m, displayName: name } : m;
+        setCurrentUser({ ...currentUser, displayName: name });
+        setMembers((prev) => prev.map(rename));
+        supabase.rpc("set_display_name", { p_name: name }).then(({ error }) => {
+          if (error) {
+            setCurrentUser(prevUser);
+            setMembers((prev) =>
+              prev.map((m) =>
+                m.userId === userId ? { ...m, displayName: prevUser.displayName } : m
+              )
+            );
+          }
+        });
       },
 
       addTask: (newTask) => {
@@ -316,15 +473,8 @@ export function AppDataProvider({
 
         if (movedIds.length === 0) return;
 
-        const persist =
-          date === null
-            ? supabase
-                .from("tasks")
-                .update({ planned_date: null, plan_order: 0 })
-                .eq("id", taskId)
-            : supabase.rpc("reorder_tasks", { p_updates: movedIds });
-
-        persist.then(({ error }: { error: unknown }) => {
+        // Writes this user's own task_plans rows; a null date un-plans.
+        supabase.rpc("reorder_tasks", { p_updates: movedIds }).then(({ error }) => {
           if (error) setTasks(prevTasks);
         });
       },
@@ -409,7 +559,18 @@ export function AppDataProvider({
         });
       },
     }),
-    [modules, tasks, icalEvents, icalSource, routines, routineCompletions, supabase, userId]
+    [
+      currentUser,
+      modules,
+      members,
+      tasks,
+      icalEvents,
+      icalSource,
+      routines,
+      routineCompletions,
+      supabase,
+      userId,
+    ]
   );
 
   return (

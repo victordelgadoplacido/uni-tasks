@@ -2,8 +2,9 @@
 
 A small Next.js app for tracking to-do items across your university modules,
 with a list view (grouped by module) and a calendar view for anything with a
-due date. Each person signs in with their own account and only ever sees
-their own modules/tasks/routines — data is stored in Supabase (hosted
+due date. Each person signs in with their own account and sees their own
+modules plus any modules shared with them (routines and week plans stay
+private) — data is stored in Supabase (hosted
 Postgres + auth), not the browser.
 
 ## Setup
@@ -20,7 +21,8 @@ npm install
      [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql)
      and then every later file in that folder in order
      ([`0002_task_pages.sql`](supabase/migrations/0002_task_pages.sql),
-     [`0003_module_order.sql`](supabase/migrations/0003_module_order.sql)),
+     [`0003_module_order.sql`](supabase/migrations/0003_module_order.sql),
+     [`0004_collaboration.sql`](supabase/migrations/0004_collaboration.sql)),
      once each, to create the tables and Row Level Security policies.
    - In Authentication → URL Configuration, add
      `http://localhost:3000/auth/callback` as a redirect URL (add your
@@ -76,7 +78,14 @@ Supabase hashes and stores passwords itself; this app never touches them.
   up as colored chips on their day (color = module). Click an empty day to
   add a task due that day; click a chip to edit that task.
 - **Week view** (`/week`): plan the rest of the week by dragging tasks onto
-  days, plus daily routines.
+  days, plus daily routines. Plans are personal, even for shared tasks.
+- **Sharing**: click "Share" on a module and add people by their account
+  email. Everyone in a module can see it and add/edit its tasks, subtasks,
+  notes, websites and documents; changes show up for everyone live. Only the
+  owner can rename/delete the module or add/remove people; others can leave.
+  Each task page has a "People working on this" list and an activity
+  timeline on the right (who created, completed or edited what, and when).
+  Click your name in the header to change how others see you.
 - Everything saves automatically to your Supabase project as you go.
 
 ## Project structure
@@ -102,6 +111,11 @@ components/
   ModulePage.tsx      Module page: reorderable task list
   TaskPage.tsx        Task page: status, description, subtasks
   TaskItems.tsx       Notes / website links / documents list + forms
+  ActivityTimeline.tsx  Task page timeline (sentences from task_activity rows)
+  ShareModuleModal.tsx  Invite/remove people, leave a module
+  ShareButton.tsx     "Share" / member avatars button on module headers
+  ProfileButton.tsx   Header name chip + rename dialog
+  Avatar.tsx          Initials avatars
   ModuleModal.tsx     Add/edit module form
   NavTabs.tsx        List/Calendar/Week/Admin tab switcher
   SignOutButton.tsx  Signs out and redirects to /login
@@ -110,7 +124,7 @@ lib/
   types.ts   Module/Task types
   colors.ts  Module color palette (Tailwind classes)
   date.ts    Date formatting + calendar grid helpers
-  supabase/  Browser/server/admin Supabase clients + DB row mappers
+  supabase/  Browser/server/admin Supabase clients, DB row mappers, shared queries
   admin/     Server-only admin helpers (list users, verify admin role)
 supabase/migrations/   Database schema + Row Level Security (run in order)
 middleware.ts   Redirects signed-out visitors to /login

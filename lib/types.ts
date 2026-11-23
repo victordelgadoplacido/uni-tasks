@@ -16,6 +16,20 @@ export interface Module {
   id: string;
   name: string;
   color: ColorKey;
+  ownerId: string;
+}
+
+// Someone with access to a module (the owner or an invited person).
+export interface ModuleMember {
+  moduleId: string;
+  userId: string;
+  role: "owner" | "member";
+  displayName: string;
+}
+
+export interface CurrentUser {
+  id: string;
+  displayName: string;
 }
 
 export interface Task {
@@ -30,7 +44,9 @@ export interface Task {
   status: TaskStatus;
   priority: Priority;
   // "YYYY-MM-DD" the task is planned for in the Week view. Independent of
-  // dueDate - purely a personal work plan, never shown on the Calendar.
+  // dueDate - purely a personal work plan (stored per user in task_plans,
+  // so collaborators each plan shared tasks on their own days), never shown
+  // on the Calendar.
   plannedDate: string | null;
   // Sort position among tasks sharing the same plannedDate (lower = earlier).
   planOrder: number;
@@ -60,6 +76,15 @@ export interface TaskItem {
   label: string;
   content: string; // note text, URL, or file path depending on kind
   position: number;
+}
+
+// One entry in a task page's timeline, written by database triggers.
+export interface TaskActivity {
+  id: number;
+  actorId: string | null;
+  action: string; // e.g. "subtask_status", see components/ActivityTimeline.tsx
+  details: Record<string, string | null>;
+  createdAt: string; // ISO timestamp
 }
 
 // A recurring personal item (gym, run, ...) that should show up on every day

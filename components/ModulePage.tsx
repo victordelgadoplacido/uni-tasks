@@ -10,6 +10,8 @@ import { sortByModuleOrder } from "@/lib/tasks";
 import { useAppData } from "@/app/providers";
 import TaskModal from "./TaskModal";
 import ModuleModal from "./ModuleModal";
+import ShareButton from "./ShareButton";
+import { AvatarStack } from "./Avatar";
 
 export interface SubtaskProgress {
   done: number;
@@ -34,11 +36,14 @@ function moveToGap<T>(list: T[], from: number, toGap: number): T[] {
 export default function ModulePage({
   moduleId,
   subtaskProgress,
+  assignees,
 }: {
   moduleId: string;
   subtaskProgress: Record<string, SubtaskProgress>;
+  // task id -> user ids of the people working on it
+  assignees: Record<string, string[]>;
 }) {
-  const { modules, tasks, reorderModuleTasks } = useAppData();
+  const { currentUser, modules, members, tasks, reorderModuleTasks } = useAppData();
   const [addingTask, setAddingTask] = useState(false);
   const [editingModule, setEditingModule] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
@@ -63,6 +68,14 @@ export default function ModulePage({
   const open = sorted.filter((t) => !t.done);
   const completed = sorted.filter((t) => t.done);
   const inProgressCount = open.filter((t) => t.status === "in_progress").length;
+  const names = new Map(
+    members.filter((m) => m.moduleId === moduleId).map((m) => [m.userId, m.displayName])
+  );
+  const peopleOn = (taskId: string) =>
+    (assignees[taskId] ?? []).map((userId) => ({
+      userId,
+      displayName: names.get(userId) ?? "Former member",
+    }));
 
   function commitOrder(newOpen: Task[]) {
     reorderModuleTasks([...newOpen, ...completed].map((t) => t.id));
@@ -96,13 +109,16 @@ export default function ModulePage({
               &middot; {completed.length} completed
             </p>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setEditingModule(true)}
-              className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
-            >
-              Edit module
-            </button>
+          <div className="flex items-center gap-2">
+            <ShareButton module={module} />
+            {module.ownerId === currentUser.id && (
+              <button
+                onClick={() => setEditingModule(true)}
+                className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              >
+                Edit module
+              </button>
+            )}
             <button
               onClick={() => setAddingTask(true)}
               className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700"
@@ -155,6 +171,7 @@ export default function ModulePage({
                     task={task}
                     index={i}
                     progress={subtaskProgress[task.id]}
+                    people={peopleOn(task.id)}
                     dragging={draggingId === task.id}
                     canMoveUp={i > 0}
                     canMoveDown={i < open.length - 1}
@@ -184,7 +201,12 @@ export default function ModulePage({
           {showCompleted && (
             <div className="border-t border-slate-100 p-3">
               {completed.map((task) => (
-                <ModuleTaskRow key={task.id} task={task} progress={subtaskProgress[task.id]} />
+                <ModuleTaskRow
+                  key={task.id}
+                  task={task}
+                  progress={subtaskProgress[task.id]}
+                  people={peopleOn(task.id)}
+                />
               ))}
             </div>
           )}
@@ -219,6 +241,7 @@ function ModuleTaskRow({
   task,
   index,
   progress,
+  people,
   dragging = false,
   canMoveUp = false,
   canMoveDown = false,
@@ -227,6 +250,7 @@ function ModuleTaskRow({
   task: Task;
   index?: number;
   progress?: SubtaskProgress;
+  people: { userId: string; displayName: string }[];
   dragging?: boolean;
   canMoveUp?: boolean;
   canMoveDown?: boolean;
@@ -305,6 +329,7 @@ function ModuleTaskRow({
         </div>
       )}
 
+      {people.length > 0 && <AvatarStack people={people} max={3} />}
       {progress && progress.total > 0 && (
         <span
           title="Subtasks completed"

@@ -1,9 +1,9 @@
 import { Module, Task } from "./types";
 
 export const SEED_MODULES: Module[] = [
-  { id: "mod-1", name: "Algorithms", color: "blue" },
-  { id: "mod-2", name: "Databases", color: "purple" },
-  { id: "mod-3", name: "Linear Algebra", color: "emerald" },
+  { id: "mod-1", name: "Algorithms", color: "blue", ownerId: "user-1" },
+  { id: "mod-2", name: "Databases", color: "purple", ownerId: "user-1" },
+  { id: "mod-3", name: "Linear Algebra", color: "emerald", ownerId: "user-1" },
 ];
 
 export const SEED_TASKS: Task[] = [

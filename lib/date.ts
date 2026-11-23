@@ -27,6 +27,22 @@ export function formatDueDate(iso: string): string {
   return label;
 }
 
+// "just now", "5m ago", "3h ago", "2d ago", then a short date.
+export function timeAgo(isoTimestamp: string): string {
+  const seconds = Math.round((Date.now() - new Date(isoTimestamp).getTime()) / 1000);
+  if (seconds < 45) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(isoTimestamp).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",

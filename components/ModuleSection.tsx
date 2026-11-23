@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Module, Task } from "@/lib/types";
 import { COLORS } from "@/lib/colors";
 import { sortByModuleOrder } from "@/lib/tasks";
+import { useAppData } from "@/app/providers";
+import ShareButton from "./ShareButton";
 import TaskRow from "./TaskRow";
 import TaskModal from "./TaskModal";
 import ModuleModal from "./ModuleModal";
@@ -21,6 +23,7 @@ export default function ModuleSection({
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [addingTask, setAddingTask] = useState(false);
   const [editingModule, setEditingModule] = useState(false);
+  const { currentUser } = useAppData();
 
   const sorted = sortByModuleOrder(tasks);
   const remaining = tasks.filter((t) => !t.done).length;
@@ -44,12 +47,15 @@ export default function ModuleSection({
           </span>
         </Link>
         <div className="flex items-center gap-1">
-          <button
-            onClick={() => setEditingModule(true)}
-            className="rounded-md px-2 py-1 text-sm font-medium text-slate-400 hover:bg-slate-100 hover:text-slate-900"
-          >
-            Edit
-          </button>
+          <ShareButton module={module} />
+          {module.ownerId === currentUser.id && (
+            <button
+              onClick={() => setEditingModule(true)}
+              className="rounded-md px-2 py-1 text-sm font-medium text-slate-400 hover:bg-slate-100 hover:text-slate-900"
+            >
+              Edit
+            </button>
+          )}
           <button
             onClick={() => setAddingTask(true)}
             className="rounded-md px-2 py-1 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900"
